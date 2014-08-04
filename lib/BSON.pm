@@ -37,40 +37,12 @@ my $int_re     = qr/^(?:(?:[+-]?)(?:[0123456789]+))$/;
 my $doub_re    = qr/^(?:(?i)(?:[+-]?)(?:(?=[0123456789]|[.])(?:[0123456789]*)(?:(?:[.])(?:[0123456789]{0,}))?)(?:(?:[E])(?:(?:[+-]?)(?:[0123456789]+))|))$/;
 #>>>
 
-sub e_name {
-    pack 'CZ*', @_;
-}
-
-sub string {
-    pack 'V/Z*', shift;
-}
-
-sub pack_q {
-    return int64_to_native(shift);
-}
-
-sub unpack_qastar {
-    my ($bson, $l1, $l2) = @_;
-    ($l1, $l2, $bson) = unpack('L2a*',$bson);
-    return (native_to_int64(pack('L2',$l1, $l2)), $bson);
-}
-
 sub s_arr {
     my ( $key, $value ) = @_;
     my $i = 0;
     tie( my %h, 'Tie::IxHash' );
     %h = map { $i++ => $_ } @$value;
-    e_name( 0x04, $key ) . encode( \%h );
-}
-
-sub s_int {
-    my ( $key, $value ) = @_;
-    if ( $value > $max_int_64 || $value < $min_int_64 ) {
-        croak("MongoDB can only handle 8-byte integers");
-    }
-    return $value > $max_int_32 || $value < $min_int_32
-      ? e_name( 0x12, $key ) . pack_q( $value )
-      : e_name( 0x10, $key ) . pack( 'l', $value );
+    pack( 'CZ*', 0x04, $key ) . encode( \%h );
 }
 
 sub _split_re {
@@ -80,121 +52,6 @@ sub _split_re {
     my ( $opt, $re ) = split( /:/, $value, 2 );
     $opt =~ s/\-\w+$//;
     return ( $re, $opt );
-}
-
-sub s_re {
-    my ( $key, $value ) = @_;
-    my ( $re, $opt ) = _split_re( $value );
-    my @o = sort grep /^(i|m|x|l|s|u)$/, split( //, $opt );
-    e_name( 0x0B, $key ) . pack( 'Z*', $re ) . pack( 'a*', @o ) . "\0";
-}
-
-sub s_dt {
-    my ( $key, $value ) = @_;
-    e_name( 0x09, $key ) . pack_q( $value->epoch * int64(1000) );
-}
-
-sub s_code {
-    my ( $key, $value ) = @_;
-    if ( ref $value->scope eq 'HASH' ) {
-        my $scope = encode( $value->scope );
-        my $code  = string( $value->code );
-        my $len   = 4 + length($scope) + length($code);
-        return e_name( 0x0F, $key ) . pack( 'L', $len ) . $code . $scope;
-    }
-    else {
-        return e_name( 0x0D, $key ) . string( $value->code );
-    }
-}
-
-sub s_hash {
-    my $doc  = shift;
-    my $bson = '';
-    while ( my ( $key, $value ) = each %$doc ) {
-
-        # Null
-        if ( !defined $value ) {
-            $bson .= e_name( 0x0A, $key );
-        }
-
-        # Array
-        elsif ( ref $value eq 'ARRAY' ) {
-            $bson .= s_arr( $key, $value );
-        }
-
-        # Document
-        elsif ( ref $value eq 'HASH' ) {
-            $bson .= e_name( 0x03, $key ) . encode($value);
-        }
-
-        # Regex
-        elsif ( ref $value eq 'Regexp' ) {
-            $bson .= s_re( $key, $value );
-        }
-
-        # ObjectId
-        elsif ( ref $value eq 'BSON::ObjectId' ) {
-            $bson .= e_name( 0x07, $key ) . $value->value;
-        }
-
-        # Datetime
-        elsif ( ref $value eq 'BSON::Time' ) {
-            $bson .= e_name( 0x09, $key ) . pack_q( $value->value );
-        }
-
-        # Timestamp
-        elsif ( ref $value eq 'BSON::Timestamp' ) {
-            $bson .=
-              e_name( 0x11, $key )
-              . pack( 'LL', $value->increment, $value->seconds );
-        }
-
-        # MinKey
-        elsif ( ref $value eq 'BSON::MinKey' ) {
-            $bson .= e_name( 0xFF, $key );
-        }
-
-        # MaxKey
-        elsif ( ref $value eq 'BSON::MaxKey' ) {
-            $bson .= e_name( 0x7F, $key );
-        }
-
-        # Binary
-        elsif ( ref $value eq 'BSON::Binary' ) {
-            $bson .= e_name( 0x05, $key ) . $value;
-        }
-
-        # Code
-        elsif ( ref $value eq 'BSON::Code' ) {
-            $bson .= s_code( $key, $value );
-        }
-
-        # Boolean
-        elsif ( ref $value eq 'BSON::Bool' ) {
-            $bson .= e_name( 0x08, $key ) . ( $value ? "\1" : "\0" );
-        }
-
-        # String (explicit)
-        elsif ( ref $value eq 'BSON::String' ) {
-            $bson .= e_name( 0x02, $key ) . string($value);
-        }
-
-        # Int (32 and 64)
-        elsif ( ref $value eq 'Math::Int64' || $value =~ $int_re ) {
-            $bson .= s_int( $key, $value );
-        }
-
-        # Double
-        elsif ( $value =~ $doub_re ) {
-            $bson .= e_name( 0x01, $key ) . pack( 'd', $value );
-        }
-
-        # String
-        else {
-            $bson .= e_name( 0x02, $key ) . string($value);
-        }
-    }
-    return $bson;
 }
 
 sub d_hash {
@@ -249,7 +106,9 @@ sub d_hash {
 
         # Datetime
         elsif ( $type == 0x09 ) {
-            ( my $dt, $bson ) = unpack_qastar( $bson );
+            my ($l1, $l2) = @_;
+            ($l1, $l2, $bson) = unpack('L2a*',$bson);
+            my $dt = native_to_int64(pack('L2',$l1, $l2));
             $value = BSON::Time->new( int( $dt / 1000 ) );
         }
 
@@ -291,7 +150,9 @@ sub d_hash {
 
         # Int64
         elsif ( $type == 0x12 ) {
-            ( $value, $bson ) = unpack_qastar( $bson );
+            my ($l1, $l2) = @_;
+            ($l1, $l2, $bson) = unpack('L2a*',$bson);
+            $value = native_to_int64(pack('L2',$l1, $l2));
         }
 
         # MinKey
@@ -316,8 +177,112 @@ sub d_hash {
 
 sub encode {
     my $doc = shift;
-    my $r   = s_hash($doc);
-    return pack( 'L', length($r) + 5 ) . $r . "\0";
+
+    my $bson = '';
+    while ( my ( $key, $value ) = each %$doc ) {
+
+        # Null
+        if ( !defined $value ) {
+            $bson .= pack( 'CZ*', 0x0A, $key );
+        }
+
+        # Array
+        elsif ( ref $value eq 'ARRAY' ) {
+            $bson .= s_arr( $key, $value );
+        }
+
+        # Document
+        elsif ( ref $value eq 'HASH' ) {
+            $bson .= pack( 'CZ*', 0x03, $key ) . encode($value);
+        }
+
+        # Regex
+        elsif ( ref $value eq 'Regexp' ) {
+            my $value_copy = $value;
+            $value_copy =~ s/^\(\?\^?//;
+            $value_copy =~ s/\)$//;
+            my ( $opt, $re ) = split( /:/, $value_copy, 2 );
+            $opt =~ s/\-\w+$//;
+            my @o = sort grep /^(i|m|x|l|s|u)$/, split( //, $opt );
+            $bson .= pack( 'CZ*', 0x0B, $key ) . pack( 'Z*', $re ) . pack( 'a*', @o ) . "\0";
+        }
+
+        # ObjectId
+        elsif ( ref $value eq 'BSON::ObjectId' ) {
+            $bson .= pack( 'CZ*', 0x07, $key ) . $value->value;
+        }
+
+        # Datetime
+        elsif ( ref $value eq 'BSON::Time' ) {
+            $bson .= pack( 'CZ*', 0x09, $key ) . int64_to_native( $value->value );
+        }
+
+        # Timestamp
+        elsif ( ref $value eq 'BSON::Timestamp' ) {
+            $bson .=
+              pack( 'CZ*', 0x11, $key )
+              . pack( 'LL', $value->increment, $value->seconds );
+        }
+
+        # MinKey
+        elsif ( ref $value eq 'BSON::MinKey' ) {
+            $bson .= pack( 'CZ*', 0xFF, $key );
+        }
+
+        # MaxKey
+        elsif ( ref $value eq 'BSON::MaxKey' ) {
+            $bson .= pack( 'CZ*', 0x7F, $key );
+        }
+
+        # Binary
+        elsif ( ref $value eq 'BSON::Binary' ) {
+            $bson .= pack( 'CZ*', 0x05, $key ) . $value;
+        }
+
+        # Code
+        elsif ( ref $value eq 'BSON::Code' ) {
+            if ( ref $value->scope eq 'HASH' ) {
+                my $scope = encode( $value->scope );
+                my $code  = pack( 'V/Z*', $value->code );
+                my $len   = 4 + length($scope) + length($code);
+                $bson .= pack( 'CZ*', 0x0F, $key ) . pack( 'L', $len ) . $code . $scope;
+            }
+            else {
+                $bson .= pack( 'CZ*', 0x0D, $key ) . pack( 'V/Z*', $value->code );
+            }
+        }
+
+        # Boolean
+        elsif ( ref $value eq 'BSON::Bool' ) {
+            $bson .= pack( 'CZ*', 0x08, $key ) . ( $value ? "\1" : "\0" );
+        }
+
+        # String (explicit)
+        elsif ( ref $value eq 'BSON::String' ) {
+            $bson .= pack( 'CZ*', 0x02, $key ) . pack( 'V/Z*', $value);
+        }
+
+        # Int (32 and 64)
+        elsif ( ref $value eq 'Math::Int64' || $value =~ $int_re ) {
+            if ( $value > $max_int_64 || $value < $min_int_64 ) {
+                croak("MongoDB can only handle 8-byte integers");
+            }
+            $bson .= $value > $max_int_32 || $value < $min_int_32 ? pack( 'CZ*', 0x12, $key ) . int64_to_native( $value )
+                                                                  : pack( 'CZ*', 0x10, $key ) . pack( 'l', $value );
+        }
+
+        # Double
+        elsif ( $value =~ $doub_re ) {
+            $bson .= pack( 'CZ*', 0x01, $key ) . pack( 'd', $value );
+        }
+
+        # String
+        else {
+            $bson .= pack( 'CZ*', 0x02, $key ) . pack( 'V/Z*', $value);
+        }
+    }
+
+    return pack( 'L', length($bson) + 5 ) . $bson . "\0";
 }
 
 sub decode {
