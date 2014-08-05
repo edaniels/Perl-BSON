@@ -182,10 +182,17 @@ sub encode {
     # of the keys that we are working on
     my @stack = [ ZEROS, $doc, [ keys %$doc ] ];
 
+    my ( $hash, $keys, $bson, $next_key, $next_value, $switched );
+
+    # We don't want to derference the same stack more than once in
+    # the current context
+    $switched = 1;
+
     while (1) {
 
-        my ( $hash, $keys ) = @{ $stack[0] }[DOC, KEYS];
-        my $bson = \( $stack[0][STRING] );
+        ( $hash, $keys ) = @{ $stack[0] }[DOC, KEYS] if $switched;
+        $bson = \( $stack[0][STRING] ) if $switched;
+        $switched = 0;
 
         # Check if we are done with this stack
         if ( !@$keys ) {
@@ -204,12 +211,13 @@ sub encode {
             else {
                 shift @stack;
                 $stack[0][0] .= $$bson;
+                $switched = 1;
                 next;
             }
         }
 
-        my $next_key = shift @$keys;
-        my $next_value = $hash->{$next_key};    
+        $next_key = shift @$keys;
+        $next_value = $hash->{$next_key};    
 
         # Find type
 
@@ -227,6 +235,7 @@ sub encode {
             %h = map { $i++ => $_ } @$next_value;
             $$bson .= pack( 'CZ*', 0x04, $next_key );
             unshift ( @stack, [ ZEROS, \%h, [ keys %h ] ] );
+            $switched = 1;
             next;
         }
 
@@ -235,6 +244,7 @@ sub encode {
 
             $$bson .= pack( 'CZ*', 0x03, $next_key );
             unshift ( @stack, [ ZEROS, $next_value, [ keys %$next_value ] ] );
+            $switched = 1;
             next;
         }
 
