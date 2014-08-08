@@ -3,6 +3,8 @@ package BSON::MaxKey;
 use strict;
 use warnings;
 
+use base qw/BSON::Types::MaxKey/;
+
 sub new {
     bless {}, $_[0];
 }

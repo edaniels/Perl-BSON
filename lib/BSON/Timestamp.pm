@@ -3,6 +3,8 @@ package BSON::Timestamp;
 use strict;
 use warnings;
 
+use base qw/BSON::Types::Timestamp/;
+
 sub new {
     my ( $class, $seconds, $increment ) = @_;
     bless {

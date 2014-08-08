@@ -10,6 +10,7 @@ lib/BSON/Code.pm
 lib/BSON/MaxKey.pm
 lib/BSON/MinKey.pm
 lib/BSON/ObjectId.pm
+lib/BSON/Regex.pm
 lib/BSON/Time.pm
 lib/BSON/Timestamp.pm
 lib/BSON/String.pm

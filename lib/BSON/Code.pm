@@ -1,5 +1,7 @@
 package BSON::Code;
 
+use base qw/BSON::Types::Code/;
+
 use strict;
 use warnings;
 

@@ -1,5 +1,7 @@
 package BSON::String;
 
+use base qw/BSON::Types::String/;
+
 use strict;
 use warnings;
 

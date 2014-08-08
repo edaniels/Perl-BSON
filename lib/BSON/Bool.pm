@@ -1,5 +1,7 @@
 package BSON::Bool;
 
+use base qw/BSON::Types::Boolean/;
+
 use strict;
 use warnings;
 

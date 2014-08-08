@@ -1,5 +1,7 @@
 package BSON::Time;
 
+use base qw/BSON::Types::DateTime/;
+
 use strict;
 use warnings;
 use Carp;

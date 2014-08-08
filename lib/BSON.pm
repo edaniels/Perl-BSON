@@ -22,6 +22,7 @@ use BSON::ObjectId;
 use BSON::Code;
 use BSON::Bool;
 use BSON::String;
+use BSON::Regex;
 
 # Maximum size of a BSON record
 our $MAX_SIZE = 16 * 1024 * 1024;
@@ -51,7 +52,8 @@ use constant {
     BSON_CODE_W_SCOPE => "l",
     BSON_REMAINING => 'a*',
     BSON_SKIP_4_BYTES => 'x4',
-    BSON_OBJECTID => 'a12',
+    BSON_OBJECTID => 'H*',
+    BSON_DECODE_OBJECTID => 'a12',
     BSON_BINARY_TYPE => 'C',
     BSON_CSTRING => 'Z*',
 };
@@ -217,7 +219,7 @@ sub decode {
 
         # ObjectId
         elsif ( $type == 0x07 ) {
-            ( my $oid, $bson ) = unpack( BSON_OBJECTID.BSON_REMAINING, $bson );
+            ( my $oid, $bson ) = unpack( BSON_DECODE_OBJECTID.BSON_REMAINING, $bson );
             $value = BSON::ObjectId->new($oid);
         }
 

@@ -1,5 +1,7 @@
 package BSON::Binary;
 
+use base BSON::Types::Binary;
+
 use strict;
 use warnings;
 
@@ -22,20 +24,19 @@ sub new {
 sub data {
     my ( $self, $data ) = @_;
     if ( defined $data ) {
-        $data = [ unpack( 'C*', $data ) ] unless ref $data eq 'ARRAY';
+        $data = pack( 'C*', @$data ) if ref $data eq 'ARRAY';
         $self->{data} = $data;
     }
     return $self->{data};
 }
 
-sub type {
+sub subtype {
     return $_[0]->{type};
 }
 
 sub to_s {
     my $self = shift;
-    my @data = @{ $self->data };
-    return pack( 'lC*', scalar(@data), $self->type, @data );
+    return pack( 'lCa*', length $self->data, $self->subtype, $self->data );
 }
 
 1;

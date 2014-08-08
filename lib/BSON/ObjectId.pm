@@ -1,5 +1,7 @@
 package BSON::ObjectId;
 
+use base qw/BSON::Types::ObjectId/;
+
 use strict;
 use warnings;
 use Carp;
@@ -24,10 +26,10 @@ sub value {
     my ( $self, $new_value ) = @_;
     if ( defined $new_value ) {
         if ( length($new_value) == 12 ) {
-            $self->{value} = $new_value;
+            $self->{value} = unpack('H*', $new_value);
         }
         elsif ( length($new_value) == 24 && $self->is_legal($new_value) ) {
-            $self->{value} = _from_s($new_value);
+            $self->{value} = $new_value;
         }
         else {
             croak("BSON::ObjectId must be a 24 char hex value");
@@ -41,8 +43,7 @@ sub is_legal {
 }
 
 sub to_s {
-    my $self = shift;
-    return unpack( 'H*', $self->value );
+    return $_[0]->{value};
 }
 
 sub op_eq {
@@ -57,15 +58,6 @@ sub _generate {
     my $proc = pack( 'n', $$ % 0xFFFF );
     my $inc  = substr( pack( 'N', $_inc++ % 0xFFFFFF ), 1, 3 );
     return $time . $host . $proc . $inc;
-}
-
-sub _from_s {
-    my @a = split( //, shift );
-    my $oid = '';
-    while ( my ( $x, $y ) = splice( @a, 0, 2 ) ) {
-        $oid .= pack( 'C', hex("$x$y") );
-    }
-    return $oid;
 }
 
 1;

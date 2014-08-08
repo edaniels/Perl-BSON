@@ -3,6 +3,8 @@ package BSON::MinKey;
 use strict;
 use warnings;
 
+use base qw/BSON::Types::MinKey/;
+
 sub new {
     bless {}, $_[0];
 }

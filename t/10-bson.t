@@ -429,7 +429,7 @@ subtest binary => sub {
     #>>>
     my $hash = decode($bson);
     isa_ok( $hash->{a}, 'BSON::Binary' );
-    is( $hash->{a}->type, $bin->type, 'compare type' );
+    is( $hash->{a}->subtype, $bin->subtype, 'compare type' );
     is_deeply( $hash->{a}->data, $bin->data, 'compare data' );
 
     $bin = BSON::Binary->new( "5366a937375901366effb80511b39919", 5 );
@@ -447,7 +447,7 @@ subtest binary => sub {
     );
     $hash = decode($bson);
     isa_ok( $hash->{a}, 'BSON::Binary' );
-    is( $hash->{a}->type, $bin->type, 'compare type' );
+    is( $hash->{a}->subtype, $bin->subtype, 'compare type' );
     is_deeply( $hash->{a}->data, $bin->data, 'compare data' );
 };
 

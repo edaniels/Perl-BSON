@@ -21,9 +21,9 @@ my $o2 = BSON::ObjectId->new( "$o1" );
 is( $o1, $o2, 'oid from string' );
 
 my $o3 = BSON::ObjectId->new('4e2766e6e1b8325d02000028');
-is_deeply(
-    [ unpack( 'C*', $o3->value ) ],
-    [ 0x4e, 0x27, 0x66, 0xe6, 0xe1, 0xb8, 0x32, 0x5d, 0x02, 0x00, 0x00, 0x28 ],
+is(
+    $o3->value,
+    '4e2766e6e1b8325d02000028',
     'oid value'
 );
 
