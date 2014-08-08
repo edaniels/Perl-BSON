@@ -13,6 +13,8 @@ use Carp;
 use Tie::IxHash;
 use Math::Int64 qw/:native_if_available int64 int64_to_native native_to_int64/;
 
+use BSON::Types;
+
 use BSON::Time;
 use BSON::Timestamp;
 use BSON::MinKey;
@@ -56,6 +58,7 @@ use constant {
     BSON_DECODE_OBJECTID => 'a12',
     BSON_BINARY_TYPE => 'C',
     BSON_CSTRING => 'Z*',
+    BSON_BINARY => "lCa*",
 };
 
 sub _split_re {
@@ -71,102 +74,165 @@ sub encode {
     my $doc = shift;
 
     my $bson = '';
-    while ( my ( $key, $value ) = each %$doc ) {
+    my (@keys, @values);
+
+    if (ref $doc eq 'Tie::IxHash') {
+
+        @keys = $doc->Keys;
+        @values = $doc->Values;
+        
+    } else {
+
+        @keys = keys %$doc;
+        @values = values %$doc;
+    }
+
+    while ( @keys ) {
+
+        my $key = shift @keys;
+        my $value = shift @values;
 
         # Null
         if ( !defined $value ) {
             $bson .= pack( BSON_TYPE_NAME, 0x0A, $key );
         }
 
-        # Array
-        elsif ( ref $value eq 'ARRAY' ) {
-            my $i = 0;
-            tie( my %h, 'Tie::IxHash' );
-            %h = map { $i++ => $_ } @$value;
-            $bson .= pack( BSON_TYPE_NAME, 0x04, $key ) . encode( \%h );
-        }
+        # Not a reference
+        elsif ( !ref( $value ) ) {
 
-        # Document
-        elsif ( ref $value eq 'HASH' ) {
-            $bson .= pack( BSON_TYPE_NAME, 0x03, $key ) . encode($value);
-        }
+            # Int (32 and 64)
+            if ($value =~ $int_re) {
 
-        # Regex
-        elsif ( ref $value eq 'Regexp' ) {
-            my ( $re, $opt ) = _split_re($value);
-            $bson .= pack( BSON_TYPE_NAME.BSON_REGEX, 0x0B, $key, $re, sort grep /^(i|m|x|l|s|u)$/, split( //, $opt ) ) . "\0";
-        }
-
-        # ObjectId
-        elsif ( ref $value eq 'BSON::ObjectId' ) {
-            $bson .= pack( BSON_TYPE_NAME.BSON_OBJECTID, 0x07, $key, $value->value );
-        }
-
-        # Datetime
-        elsif ( ref $value eq 'BSON::Time' ) {
-            $bson .= pack( BSON_TYPE_NAME, 0x09, $key ) . int64_to_native( $value->value );
-        }
-
-        # Timestamp
-        elsif ( ref $value eq 'BSON::Timestamp' ) {
-            $bson .= pack( BSON_TYPE_NAME.BSON_TIMESTAMP, 0x11, $key, $value->increment, $value->seconds );
-        }
-
-        # MinKey
-        elsif ( ref $value eq 'BSON::MinKey' ) {
-            $bson .= pack( BSON_TYPE_NAME, 0xFF, $key );
-        }
-
-        # MaxKey
-        elsif ( ref $value eq 'BSON::MaxKey' ) {
-            $bson .= pack( BSON_TYPE_NAME, 0x7F, $key );
-        }
-
-        # Binary
-        elsif ( ref $value eq 'BSON::Binary' ) {
-            $bson .= pack( BSON_TYPE_NAME, 0x05, $key ) . $value;
-        }
-
-        # Code
-        elsif ( ref $value eq 'BSON::Code' ) {
-            if ( ref $value->scope eq 'HASH' ) {
-                my $scope = encode( $value->scope );
-                my $code  = pack( BSON_STRING, $value->code );
-                $bson .= 
-                    pack( BSON_TYPE_NAME.BSON_CODE_W_SCOPE, 0x0F, $key, (4 + length($scope) + length($code)) ) . $code . $scope;
+                if ( $value > $max_int_64 || $value < $min_int_64 ) {
+                    croak("MongoDB can only handle 8-byte integers");
+                }
+                $bson .= $value > $max_int_32 || $value < $min_int_32 ? pack( BSON_TYPE_NAME.BSON_REMAINING, 0x12, $key, int64_to_native( $value ))
+                                                                      : pack( BSON_TYPE_NAME.BSON_INT32, 0x10, $key, $value );
             }
+
+            # Double
+            elsif ( $value =~ $doub_re ) {
+                $bson .= pack( BSON_TYPE_NAME.BSON_DOUBLE, 0x01, $key, $value );
+            }
+
+            # String
             else {
-                $bson .= pack( BSON_TYPE_NAME.BSON_STRING, 0x0D, $key, $value->code );
+                $bson .= pack( BSON_TYPE_NAME.BSON_STRING, 0x02, $key, $value );
             }
-        }
 
-        # Boolean
-        elsif ( ref $value eq 'BSON::Bool' ) {
-            $bson .= pack( BSON_TYPE_NAME.BSON_BOOLEAN, 0x08, $key, ( $value ? 1 : 0 ) );
-        }
+        # Unblessed reference
+        } elsif ( !UNIVERSAL::can( $value, 'can' ) ) {
 
-        # String (explicit)
-        elsif ( ref $value eq 'BSON::String' ) {
-            $bson .= pack( BSON_TYPE_NAME.BSON_STRING, 0x02, $key, $value );
-        }
+            # Scalar
+            if ( ref $value eq 'SCALAR' ) {
 
-        # Int (32 and 64)
-        elsif ( ref $value eq 'Math::Int64' || $value =~ $int_re ) {
-            if ( $value > $max_int_64 || $value < $min_int_64 ) {
-                croak("MongoDB can only handle 8-byte integers");
+                my $val = $$value;
+
+                # Int (32 and 64)
+                if ($val =~ $int_re) {
+
+                    if ( $val > $max_int_64 || $val < $min_int_64 ) {
+                        croak("MongoDB can only handle 8-byte integers");
+                    }
+                    $bson .= $val > $max_int_32 || $val < $min_int_32 ? pack( BSON_TYPE_NAME.BSON_REMAINING, 0x12, $key, int64_to_native( $val ))
+                                                                          : pack( BSON_TYPE_NAME.BSON_INT32, 0x10, $key, $val );
+                }
+
+                # Double
+                elsif ( $val =~ $doub_re ) {
+                    $bson .= pack( BSON_TYPE_NAME.BSON_DOUBLE, 0x01, $key, $val );
+                }
+
+                # String
+                else {
+                    $bson .= pack( BSON_TYPE_NAME.BSON_STRING, 0x02, $key, $val );
+                }
             }
-            $bson .= $value > $max_int_32 || $value < $min_int_32 ? pack( BSON_TYPE_NAME.BSON_REMAINING, 0x12, $key, int64_to_native( $value ))
-                                                                  : pack( BSON_TYPE_NAME.BSON_INT32, 0x10, $key, $value );
-        }
 
-        # Double
-        elsif ( $value =~ $doub_re ) {
-            $bson .= pack( BSON_TYPE_NAME.BSON_DOUBLE, 0x01, $key, $value );
-        }
+            # Array
+            elsif ( ref $value eq 'ARRAY' ) {
+                my $i = 0;
+                tie( my %h, 'Tie::IxHash' );
+                %h = map { $i++ => $_ } @$value;
+                $bson .= pack( BSON_TYPE_NAME, 0x04, $key ) . encode( \%h );
+            }
 
-        # String
-        else {
-            $bson .= pack( BSON_TYPE_NAME.BSON_STRING, 0x02, $key, $value );
+            # Document
+            elsif ( ref $value eq 'HASH' ) {
+                $bson .= pack( BSON_TYPE_NAME, 0x03, $key ) . encode($value);
+            }
+
+        # Blessed reference
+        } else {
+
+            # ObjectId
+            if ( $value->isa('BSON::Types::ObjectId') ) {
+                $bson .= pack( BSON_TYPE_NAME.BSON_OBJECTID, 0x07, $key, $value->value );
+            }
+
+            # Datetime
+            elsif ( $value->isa('BSON::Types::DateTime') ) {
+                $bson .= pack( BSON_TYPE_NAME, 0x09, $key ) . int64_to_native( $value->value );
+            }
+
+            # Timestamp
+            elsif ( $value->isa('BSON::Types::Timestamp') ) {
+                $bson .= pack( BSON_TYPE_NAME.BSON_TIMESTAMP, 0x11, $key, $value->increment, $value->seconds );
+            }
+
+            # MinKey
+            elsif ( $value->isa('BSON::Types::MinKey') ) {
+                $bson .= pack( BSON_TYPE_NAME, 0xFF, $key );
+            }
+
+            # MaxKey
+            elsif ( $value->isa('BSON::Types::MaxKey') ) {
+                $bson .= pack( BSON_TYPE_NAME, 0x7F, $key );
+            }
+
+            # Binary
+            elsif ( $value->isa('BSON::Types::Binary') ) {
+                $bson .= pack( BSON_TYPE_NAME.BSON_BINARY, 0x05, $key, length $value->data, $value->subtype, $value->data );
+            }
+
+            # Code
+            elsif ( $value->isa('BSON::Types::Code') ) {
+                if ( ref $value->scope eq 'HASH' ) {
+                    my $scope = encode( $value->scope );
+                    my $code  = pack( BSON_STRING, $value->code );
+                    $bson .= 
+                        pack( BSON_TYPE_NAME.BSON_CODE_W_SCOPE, 0x0F, $key, (4 + length($scope) + length($code)) ) . $code . $scope;
+                }
+                else {
+                    $bson .= pack( BSON_TYPE_NAME.BSON_STRING, 0x0D, $key, $value->code );
+                }
+            }
+
+            # Boolean
+            elsif ( $value->isa('BSON::Types::Boolean') ) {
+                $bson .= pack( BSON_TYPE_NAME.BSON_BOOLEAN, 0x08, $key, ( $value->value ? 1 : 0 ) );
+            }
+
+            # String (explicit)
+            elsif ( $value->isa('BSON::Types::String') ) {
+                $bson .= pack( BSON_TYPE_NAME.BSON_STRING, 0x02, $key, $value->value );
+            }
+
+            # Int (32 and 64)
+            elsif ( $value->isa('Math::Int64') ) {
+                if ( $value > $max_int_64 || $value < $min_int_64 ) {
+                    croak("MongoDB can only handle 8-byte integers");
+                }
+                $bson .= $value > $max_int_32 || $value < $min_int_32 ? pack( BSON_TYPE_NAME.BSON_REMAINING, 0x12, $key, int64_to_native( $value ))
+                                                                      : pack( BSON_TYPE_NAME.BSON_INT32, 0x10, $key, $value );
+            }
+
+            # Regex
+            elsif ( ref $value eq 'Regexp' ) {
+                print "have\n";
+                my ( $re, $opt ) = _split_re($value);
+                $bson .= pack( BSON_TYPE_NAME.BSON_REGEX, 0x0B, $key, $re, sort grep /^(i|m|x|l|s|u)$/, split( //, $opt ) ) . "\0";
+            }
         }
     }
 
@@ -179,7 +245,7 @@ sub decode {
     if ( length($bson) != $len ) {
         croak("Incorrect length of the bson string");
     }
-    my %opt = @_;
+    my %opt = @_ if @_ % 2 == 0;
     $bson = substr( $bson, 4, -1 );
     my %hash = ();
     tie( %hash, 'Tie::IxHash' ) if $opt{ixhash};
